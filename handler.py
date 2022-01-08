@@ -27,10 +27,13 @@ class TanglinTennisCourtHandler:
     def make_reservations(self, date: str, indoor: bool, duration: int, times: list[int]):
         assert duration in (1, 2), "duration can only be 1 or 2 hours"
 
+        date = pd.Timestamp(date).floor('d')
         self._login()
         # wait till that time and start loading options, it'll take approximate 5s depending on network connectivity to load new pages
-        self._go_to_cms_page_and_wait(till='06:59:56')
-        self._set_options(pd.Timestamp(date), indoor, duration)
+        self._go_to_cms_page()
+        self._set_options(date, indoor, duration)
+        self._wait(till='06:59:58')
+        self._refresh_selections(date)
 
         failures = []
         for t in times:
@@ -73,13 +76,82 @@ class TanglinTennisCourtHandler:
 
         self._is_logged_in = True
 
-    def _go_to_cms_page_and_wait(self, till='0700'):
-        """Goes to the CMS page and waits there till 7am"""
+    def _go_to_cms_page(self):
+        """Goes to the CMS page"""
         self._driver.get("https://thetanglinclub.clubhouseonline-e3.net/CMSModules/CHO/CourtManagement/CourtBooking.aspx")
-        selector_css = "div.dropdown.ng-isolate-scope.ng-not-empty.ng-valid"
-        self._check_element((By.CSS_SELECTOR, selector_css), "Could not load Tennis booking table page")
+        self._check_element((By.CSS_SELECTOR, 'div.date-selector.ng-isolate-scope'), "Could not load Tennis booking page", 5)
 
-        self._wait(till=till)
+    def _set_options(self, date: pd.Timestamp, indoor: bool, duration=2):
+        """Sets up the Tennis options. The outcome of this is a Table of available time slots in the webpage."""
+
+        selector_css = "div.dropdown.ng-isolate-scope.ng-not-empty.ng-valid"
+        # select indoor or outdoor courts and num hours
+        option_li_selector = 'li.ng-binding.ng-scope'
+
+        self._select_date(date)
+
+        def _select_option(target: str):
+            self._check_element((By.CSS_SELECTOR, f"{selector_css}.open"))
+            for ee in self._driver.find_elements(By.CSS_SELECTOR, option_li_selector):
+                if ee.text == target:
+                    print(f"Switching to '{target}'")
+                    ee.click()
+                    self._check_load_okay()
+                    break
+            else:
+                raise RuntimeError(f"Could not detect {duration_text} option")
+
+        for e in self._driver.find_elements(By.CSS_SELECTOR, "a.dropdown-display.ng-binding"):
+            match e.text:
+                case 'Tennis Courts - Outdoor Tennis Court.' | 'Tennis Courts - Indoor Tennis Court.' | \
+                     'Squash Courts - Singles Squash Courts' | 'Squash Courts - Doubles Squash Courts':
+                    # this sets the correct court type
+                    if (indoor and e.text == 'Tennis Courts - Indoor Tennis Court.') or (not indoor and e.text == 'Tennis Courts - Outdoor Tennis Court.'):
+                        continue
+
+                    e.click()  # this opens the selector
+                    self._check_element((By.CSS_SELECTOR, f"{selector_css}.open"), "Could not open court type selector")
+                    for ee in self._driver.find_elements(By.CSS_SELECTOR, option_li_selector):  # type: WebElement
+                        if ((indoor and ee.text == 'Tennis Courts - Indoor Tennis Court.') or
+                                (not indoor and ee.text == 'Tennis Courts - Outdoor Tennis Court.')):
+                            print(f"Switching to court type: {ee.text}")
+                            ee.click()
+                            self._check_load_okay()
+                            break
+                    else:
+                        raise RuntimeError(f"Could not detect {'Indoors' if indoor else 'Outdoors'} option")
+                case '1 hour' | '2 hours':
+                    # this sets the correct duration
+                    duration_text = f"{duration} hour{'s' if duration > 1 else ''}"
+                    if e.text == duration_text:  # already in correct duration
+                        continue
+
+                    e.click()
+                    _select_option(duration_text)
+                case 'Only Show Available' | 'All times' | 'Morning' | 'Afternoon' | 'Evening':
+                    # show only available times to speed session up
+                    target_text = 'Only Show Available'
+                    if e.text == target_text:
+                        continue
+
+                    e.click()
+                    _select_option(target_text)
+                case _:
+                    continue
+
+    def _select_date(self, date: pd.Timestamp):
+        date_text = date.strftime('%b %#d')
+        for e in self._driver.find_elements(By.CSS_SELECTOR, 'div.date.ng-binding'):  # type: WebElement
+            if e.text == date_text:
+                print(f"Switching to date: {date_text}")
+                e.click()
+                self._check_load_okay()
+                break
+        else:
+            raise RuntimeError(f"Could not find date {date:%Y-%m-%d} in Tennis loading page")
+
+    def _check_load_okay(self):
+        self._check_element((By.CSS_SELECTOR, 'div.container.slick-initialized.slick-slider'), "Could not load schedule table", 5)
 
     @staticmethod
     def _wait(till: str):
@@ -89,71 +161,20 @@ class TanglinTennisCourtHandler:
         now = pd.Timestamp.now()
         # gets the next opening time for booking
         if now.hour >= hour and now.minute >= minute and now.second >= second and now.microsecond > 0:
-            opening_time = (now.floor('d') + pd.offsets.Day(1)).replace(hour=hour, minute=minute, second=second)
+            sleep_till_time = (now.floor('d') + pd.offsets.Day(1)).replace(hour=hour, minute=minute, second=second)
         else:
-            opening_time = now.floor('d').replace(hour=hour, minute=minute, second=second)
+            sleep_till_time = now.floor('d').replace(hour=hour, minute=minute, second=second)
 
-        while now < opening_time:
+        while now < sleep_till_time:
             # sleep till opening time, we are conservative in that we sleep slightly more
-            sleep_duration = np.ceil((opening_time - now).total_seconds())
+            sleep_duration = np.ceil((sleep_till_time - now).total_seconds())
+            print(f"Sleeping for {sleep_duration} seconds")
             time.sleep(sleep_duration)
             now = pd.Timestamp.now()
 
-    def _set_options(self, date: pd.Timestamp, indoors: bool, duration=2):
-        """Sets up the Tennis options. The outcome of this is a Table of available time slots in the webpage."""
-
-        def _check_load_okay():
-            self._check_element((By.CSS_SELECTOR, 'div.container.slick-initialized.slick-slider'), "Could not load schedule table")
-
-        selector_css = "div.dropdown.ng-isolate-scope.ng-not-empty.ng-valid"
-        # court type selector links
-        date_text = date.strftime('%b %#d')
-        for e in self._driver.find_elements(By.CSS_SELECTOR, 'div.date.ng-binding'):  # type: WebElement
-            if e.text == date_text:
-                e.click()
-                _check_load_okay()
-                break
-        else:
-            raise RuntimeError(f"Could not find date {date:%Y-%m-%d} in Tennis loading page")
-
-        # select indoor or outdoor courts and num hours
-        option_li_selector = 'li.ng-binding.ng-scope'
-        for e in self._driver.find_elements(By.CSS_SELECTOR, "a.dropdown-display.ng-binding"):
-            match e.text:
-                case 'Tennis Courts - Outdoor Tennis Court.' | 'Tennis Courts - Indoor Tennis Court.' | \
-                     'Squash Courts - Singles Squash Courts' | 'Squash Courts - Doubles Squash Courts':
-                    # this sets the correct court type
-                    if (indoors and e.text == 'Tennis Courts - Indoor Tennis Court.') or (not indoors and e.text == 'Tennis Courts - Outdoor Tennis Court.'):
-                        continue
-
-                    e.click()
-                    self._check_element((By.CSS_SELECTOR, f"{selector_css}.open"), "Could not open court type selector")
-                    for ee in self._driver.find_elements(By.CSS_SELECTOR, option_li_selector):  # type: WebElement
-                        if ((indoors and ee.text == 'Tennis Courts - Indoor Tennis Court.') or
-                                (not indoors and ee.text == 'Tennis Courts - Outdoor Tennis Court.')):
-                            ee.click()
-                            _check_load_okay()
-                            break
-                    else:
-                        raise RuntimeError(f"Could not detect {'Indoors' if indoors else 'Outdoors'} option")
-                case '1 hour' | '2 hours':
-                    # this sets the correct duration
-                    duration_text = f"{duration} hour{'s' if duration > 1 else ''}"
-                    if e.text == duration_text:  # already in correct duration
-                        continue
-
-                    e.click()
-                    self._check_element((By.CSS_SELECTOR, f"{selector_css}.open"))
-                    for ee in self._driver.find_elements(By.CSS_SELECTOR, option_li_selector):
-                        if ee.text == duration_text:
-                            ee.click()
-                            _check_load_okay()
-                            print('Here')
-                            break
-                    else:
-                        raise RuntimeError(f"Could not detect {duration_text} option")
-                case _:
-                    continue
+    def _refresh_selections(self, date: pd.Timestamp):
+        self._select_date(date - pd.offsets.Day(1))
+        self._select_date(date)
 
     def _reserve_time(self, time: int):
         if time < 12:
@@ -163,13 +184,16 @@ class TanglinTennisCourtHandler:
         else:
             time_text = f'{time % 12}:00 PM'
 
-        book_now_css = 'a.btn.btn-primary.ng-binding'
         # searches the time boxes which upon selection brings us to the booking page
         elements = [e for e in self._driver.find_elements(By.CSS_SELECTOR, 'div.start-time.ng-binding.ng-scope') if e.text == time_text]
+
+        if len(elements) == 0:  # no matching timings, continue
+            return False
 
         for e in elements:
             try:
                 e.click()  # clicks on the time box and enter the booking page
+                book_now_css = 'a.btn.btn-primary.ng-binding'
                 self._check_element((By.CSS_SELECTOR, book_now_css), "Could not find 'Book Now' button, this is CRITICAL")
 
                 # book the court
