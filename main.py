@@ -1,25 +1,31 @@
 import os
+from collections import Counter
 from dataclasses import dataclass
-from datetime import datetime, timedelta
 
 import click
+import pandas as pd
 
 from handler import TanglinTennisCourtHandler
 
 
 @click.command()
-@click.option('-u', '--username', default=os.getenv('UID'))
-@click.option('-p', '--password', default=os.getenv('PWD'))
-@click.option('--indoor/--outdoor', default=True)
-@click.option('--duration', default=2, type=int)
-@click.option('--date', type=str)
-@click.option('-t', '--times', multiple=True, type=int, default=[8])
+@click.option('-u', '--username', default=os.getenv('UID'), help="Login ID")
+@click.option('-p', '--password', default=os.getenv('PWD'), help="Password")
+@click.option('--indoor/--outdoor', default=True, help="If set, books indoor courts. Can also use --outdoors to specify outdoor courts. Defaults to indoors")
+@click.option('--duration', default=2, type=int, help="Number of hours to reserve. Defaults to 2.")
+@click.option('--date', type=str, help="Date to make reservation. See README for more info on how the default works")
+@click.option('-t', '--times', multiple=True, type=int, default=[8],
+              help="A list of times to book. Defaults to just 8am. Must not have duplicates. Times are reserved in order of priority. "
+                   "So if you like a 9am slot over an 8am one, put -t 9 -t 8")
 def book_tanglin_tennis_courts(username: str,
                                password: str,
                                indoor: bool,
                                duration: int,
                                date: str,
                                times: list[int]):
+    """
+    Command line function to make reservation for the Tanglin Club Tennis courts
+    """
     args = Arguments(username, password, indoor, duration, date, times)
     _run_handler(args)
 
@@ -49,10 +55,16 @@ class Arguments:
     @staticmethod
     def _validate_date(date: str):
         if date is None:
-            return (datetime.now() + timedelta(days=7)).strftime('%Y-%m-%d')
+            now = pd.Timestamp.now()
+            if now.hour >= 7 and now.minute >= 0 and now.second >= 0 and now.microsecond > 0:
+                now = now.ceil('d')  # move to next day
+            else:
+                now = now.floor('d')  # drop to current day
+
+            return (now + pd.offsets.Day(7)).strftime('%Y-%m-%d')
         else:
             try:
-                return datetime.strptime(date, "%Y-%m-%d").strftime('%Y-%m-%d')
+                return pd.Timestamp(date).strftime('%Y-%m-%d')
             except ValueError:
                 raise ValueError(f"Invalid date: '{date}'. Please use format YYYY-MM-DD")
 
@@ -65,10 +77,14 @@ class Arguments:
     @staticmethod
     def _validate_times(times: list[int]):
         assert len(times) > 0, "times must be provided"
+        if len(times) != len(set(times)):
+            duplicates = [x for x, c in Counter(times).items() if c > 1]
+            raise ValueError(f"The following times are duplicated: {sorted(duplicates)}")
+
         for t in times:
             assert isinstance(t, int) and 6 <= t <= 22, "time must be between 6 to 22 (hours, 6am to 10pm)"
 
-        return sorted(set(times))
+        return times
 
 
 if __name__ == '__main__':
