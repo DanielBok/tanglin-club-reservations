@@ -14,8 +14,8 @@ from handler import TanglinTennisCourtHandler
 @click.option('--indoor/--outdoor', default=True, help="If set, books indoor courts. Can also use --outdoors to specify outdoor courts. Defaults to indoors")
 @click.option('--duration', default=2, type=int, help="Number of hours to reserve. Defaults to 2.")
 @click.option('--date', type=str, help="Date to make reservation. See README for more info on how the default works")
-@click.option('-t', '--times', multiple=True, type=int, default=[8],
-              help="A list of times to book. Defaults to just 8am. Must not have duplicates. Times are reserved in order of priority. "
+@click.option('-t', '--times', multiple=True, type=int, default=[7, 8],
+              help="A list of times to book. Defaults to 7 and 8 am. Must not have duplicates. Times are reserved in order of priority. "
                    "So if you like a 9am slot over an 8am one, put -t 9 -t 8")
 def book_tanglin_tennis_courts(username: str,
                                password: str,
@@ -56,7 +56,7 @@ class Arguments:
     def _validate_date(date: str):
         if date is None:
             now = pd.Timestamp.now()
-            if now.hour >= 7 and now.minute >= 0 and now.second >= 0 and now.microsecond > 0:
+            if now > now.floor('d').replace(hour=7):
                 now = now.ceil('d')  # move to next day
             else:
                 now = now.floor('d')  # drop to current day

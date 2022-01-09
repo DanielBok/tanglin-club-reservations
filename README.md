@@ -23,12 +23,12 @@ To execute the script in the command shell:
 
 ```shell
 # see command line docs 
-python main.py --help
+python terminal.py --help
 
 # Books indoor courts
 # Prefer 8am then 7 am then 10am. 
 # books for duration of 2 hours
 # uses default date
 # Note that it only books one court, if one is successful, program halts
-python main.py -u loginId -p loginPwd --indoor -t 8 -t 7 -t 10 -duration 2
+python terminal.py -u loginId -p loginPwd --indoor -t 8 -t 7 -t 10 -duration 2
 ```

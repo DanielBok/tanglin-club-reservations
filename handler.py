@@ -79,7 +79,7 @@ class TanglinTennisCourtHandler:
     def _go_to_cms_page(self):
         """Goes to the CMS page"""
         self._driver.get("https://thetanglinclub.clubhouseonline-e3.net/CMSModules/CHO/CourtManagement/CourtBooking.aspx")
-        self._check_element((By.CSS_SELECTOR, 'div.date-selector.ng-isolate-scope'), "Could not load Tennis booking page", 5)
+        self._check_element((By.CSS_SELECTOR, 'div.date-selector.ng-isolate-scope'), "Could not load Tennis booking page", 3)
 
     def _set_options(self, date: pd.Timestamp, indoor: bool, duration=2):
         """Sets up the Tennis options. The outcome of this is a Table of available time slots in the webpage."""
@@ -151,7 +151,7 @@ class TanglinTennisCourtHandler:
             raise RuntimeError(f"Could not find date {date:%Y-%m-%d} in Tennis loading page")
 
     def _check_load_okay(self):
-        self._check_element((By.CSS_SELECTOR, 'div.container.slick-initialized.slick-slider'), "Could not load schedule table", 5)
+        self._check_element((By.CSS_SELECTOR, 'div.container.slick-initialized.slick-slider'), "Could not load schedule table", 3)
 
     @staticmethod
     def _wait(till: str):
@@ -159,15 +159,15 @@ class TanglinTennisCourtHandler:
 
         hour, minute, second = map(int, till.split(':'))
         now = pd.Timestamp.now()
-        # gets the next opening time for booking
-        if now.hour >= hour and now.minute >= minute and now.second >= second and now.microsecond > 0:
-            sleep_till_time = (now.floor('d') + pd.offsets.Day(1)).replace(hour=hour, minute=minute, second=second)
-        else:
-            sleep_till_time = now.floor('d').replace(hour=hour, minute=minute, second=second)
 
-        while now < sleep_till_time:
+        # gets the next opening time for booking
+        wait_till_time = now.floor('d').replace(hour=hour, minute=minute, second=second)
+        if now > wait_till_time:
+            wait_till_time += pd.offsets.Day(1)
+
+        while now < wait_till_time:
             # sleep till opening time, we are conservative in that we sleep slightly more
-            sleep_duration = np.ceil((sleep_till_time - now).total_seconds())
+            sleep_duration = np.ceil((wait_till_time - now).total_seconds())
             print(f"Sleeping for {sleep_duration} seconds")
             time.sleep(sleep_duration)
             now = pd.Timestamp.now()
