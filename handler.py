@@ -188,6 +188,7 @@ class TanglinTennisCourtHandler:
         elements = [e for e in self._driver.find_elements(By.CSS_SELECTOR, 'div.start-time.ng-binding.ng-scope') if e.text == time_text]
 
         if len(elements) == 0:  # no matching timings, continue
+            print(f"No slots found for {time_text}")
             return False
 
         for e in elements:
